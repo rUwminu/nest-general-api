@@ -110,6 +110,13 @@ export class EventService {
     const event = await this.assertOwner(id, userId);
     const joinPolicy = dto.joinPolicy ?? event.joinPolicy;
 
+    const resultingStartDate = dto.startsAt ?? event.startDate;
+    const resultingEndDate = dto.endsAt ?? event.endDate;
+
+    if (resultingEndDate.getTime() <= resultingStartDate.getTime()) {
+      throw new BadRequestException('endsAt must be after startsAt');
+    }
+
     const targetUserIds =
       dto.inviteUserIds !== undefined
         ? await this.sanitizeInviteUserIds(userId, dto.inviteUserIds)
@@ -209,14 +216,7 @@ export class EventService {
     status: 'ACCEPTED' | 'DECLINED',
   ): Promise<EventInvite> {
     const event = await this.findRaw(eventId);
-
-    if (event.isBanned) {
-      throw new BadRequestException('This event is currently unavailable');
-    }
-
-    if (event.endDate.getTime() < Date.now()) {
-      throw new BadRequestException('Event has already closed');
-    }
+    this.assertJoinable(event);
 
     const invite = await this.prisma.eventInvite.findUnique({
       where: { eventId_userId: { eventId, userId } },
@@ -250,14 +250,7 @@ export class EventService {
 
   async join(eventId: string, userId: string): Promise<EventParticipant> {
     const event = await this.findRaw(eventId);
-
-    if (event.isBanned) {
-      throw new BadRequestException('This event is currently unavailable');
-    }
-
-    if (event.endDate.getTime() < Date.now()) {
-      throw new BadRequestException('Event has already closed');
-    }
+    this.assertJoinable(event);
 
     const existingParticipant = await this.prisma.eventParticipant.findUnique({
       where: { eventId_userId: { eventId, userId } },
@@ -390,6 +383,20 @@ export class EventService {
     }
 
     return event;
+  }
+
+  private assertJoinable(event: Event): void {
+    if (event.isBanned) {
+      throw new BadRequestException('This event is currently unavailable');
+    }
+
+    if (!event.isActive) {
+      throw new BadRequestException('This event is currently paused');
+    }
+
+    if (event.endDate.getTime() < Date.now()) {
+      throw new BadRequestException('Event has already closed');
+    }
   }
 
   private visibilityWhere(

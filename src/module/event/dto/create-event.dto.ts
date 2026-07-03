@@ -12,6 +12,7 @@ import {
   MinLength,
 } from 'class-validator';
 import { EventJoinPolicy } from '../../../../generated/prisma/client.js';
+import { IsAfter } from '../../../common/decorators/is-after.decorator.js';
 
 const MIN_LEAD_TIME_MINUTES = 5;
 
@@ -41,6 +42,7 @@ export class CreateEventDto {
   @MinDate(minEventDate, {
     message: `endsAt must be at least ${MIN_LEAD_TIME_MINUTES} minutes from now`,
   })
+  @IsAfter('startsAt', { message: 'endsAt must be after startsAt' })
   endsAt: Date;
 
   @IsOptional()

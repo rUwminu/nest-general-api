@@ -13,7 +13,7 @@ const arcjetMode = process.env.ARCJET_MODE === 'DRY_RUN' ? 'DRY_RUN' : 'LIVE';
 
 // Powershell cmd test shield
 // 1..60 | ForEach-Object {
-//   curl.exe -s -o NUL -w "%{http_code}`n" http://localhost:3000
+//   curl.exe -s -o NUL -w "%{http_code}`n" http://localhost:5000
 // }
 
 @Module({

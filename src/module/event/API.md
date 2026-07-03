@@ -48,17 +48,17 @@ Create an event. `authorId` is taken from the session — never send it in the b
 }
 ```
 
-| Field           | Type     | Required | Notes                                                                                    |
-| --------------- | -------- | -------- | ---------------------------------------------------------------------------------------- |
-| `name`          | string   | yes      | min 3 chars                                                                              |
-| `description`   | string   | yes      | min 10, max 1000 chars                                                                   |
-| `startsAt`      | ISO date | yes      | must be ≥ 5 minutes from now                                                             |
-| `endsAt`        | ISO date | yes      | must be ≥ 5 minutes from now                                                             |
-| `isActive`      | boolean  | no       | default `true`; manual pause switch, not the time-based closure                          |
-| `joinPolicy`    | enum     | no       | `OPEN` \| `INVITE_ONLY`, default `OPEN`                                                  |
-| `inviteUserIds` | string[] | no       | deduped, self excluded automatically; **required (≥1)** if `joinPolicy` is `INVITE_ONLY` |
+| Field           | Type     | Required | Notes                                                                                                                    |
+| --------------- | -------- | -------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `name`          | string   | yes      | min 3 chars                                                                                                              |
+| `description`   | string   | yes      | min 10, max 1000 chars                                                                                                   |
+| `startsAt`      | ISO date | yes      | must be ≥ 5 minutes from now                                                                                             |
+| `endsAt`        | ISO date | yes      | must be ≥ 5 minutes from now, and strictly after `startsAt`                                                              |
+| `isActive`      | boolean  | no       | default `true`; manual pause switch — blocks `join`/`invite/respond` while `false`, separate from the time-based closure |
+| `joinPolicy`    | enum     | no       | `OPEN` \| `INVITE_ONLY`, default `OPEN`                                                                                  |
+| `inviteUserIds` | string[] | no       | deduped, self excluded automatically; **required (≥1)** if `joinPolicy` is `INVITE_ONLY`                                 |
 
-**Errors:** `400` if invite-only with no invitees, or any `inviteUserIds` doesn't match a real user.
+**Errors:** `400` if invite-only with no invitees, any `inviteUserIds` doesn't match a real user, or `endsAt` isn't after `startsAt`.
 
 ---
 
@@ -98,7 +98,7 @@ Update an event. **Owner only.**
 
 `inviteUserIds`, if present, **replaces** the event's invite list the same way `PUT /event/:id/invites` does (diffed: missing users removed, new users added, unchanged users keep their `PENDING`/`ACCEPTED`/`DECLINED` status). Omit the field entirely to leave existing invites untouched. `PUT /event/:id/invites` still exists as a lighter-weight alternative when you only need to change invites without resending the rest of the event.
 
-**Errors:** `403` if the caller isn't the event's author. `404` if not found/deleted. `400` if `inviteUserIds` contains an unknown userId, or if the resulting `joinPolicy` is `INVITE_ONLY` with zero invitees (whether that's because `inviteUserIds` was sent empty, or because `joinPolicy` was switched to `INVITE_ONLY` on an event that currently has no invites).
+**Errors:** `403` if the caller isn't the event's author. `404` if not found/deleted. `400` if `inviteUserIds` contains an unknown userId, if the resulting `joinPolicy` is `INVITE_ONLY` with zero invitees (whether that's because `inviteUserIds` was sent empty, or because `joinPolicy` was switched to `INVITE_ONLY` on an event that currently has no invites), or if the resulting `endsAt`/`startsAt` pair (merging whatever you sent with the event's existing dates) would leave `endsAt` before or equal to `startsAt` — this is checked even if you only send one of the two dates.
 
 ---
 
@@ -146,7 +146,7 @@ this event.
 - `ACCEPTED` → also creates the caller's `EventParticipant` row (idempotent).
 - `DECLINED` → only updates the invite row; doesn't remove any existing participation.
 
-**Errors:** `404` if the caller has no invite for this event. `400` if the event is banned or `endsAt` has already passed ("Event has already closed").
+**Errors:** `404` if the caller has no invite for this event. `400` if the event is banned, paused (`isActive: false`), or `endsAt` has already passed ("Event has already closed").
 
 ---
 
@@ -158,7 +158,7 @@ Join an event directly (no body).
 - `OPEN` events → joins immediately.
 - `INVITE_ONLY` events → requires an existing `EventInvite` row for the caller, **in any status** (a prior decline doesn't lock you out — you can still join later).
 
-**Errors:** `403` if `INVITE_ONLY` and the caller was never invited. `400` if the event is banned or already closed (`now() > endsAt`).
+**Errors:** `403` if `INVITE_ONLY` and the caller was never invited. `400` if the event is banned, paused (`isActive: false`), or already closed (`now() > endsAt`).
 
 ---
 
