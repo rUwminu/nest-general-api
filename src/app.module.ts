@@ -1,18 +1,47 @@
-import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
-import { ApiKeyMiddleware } from './middleware/api-key.middleware';
-import { AppController } from './app.controller';
-import { AppService } from './app.service';
-import { UserModule } from './user/user.module';
-import { UserController } from './user/user.controller';
+import { Module } from '@nestjs/common';
+import { APP_GUARD } from '@nestjs/core';
+import { ArcjetGuard, ArcjetModule, fixedWindow, shield } from '@arcjet/nest';
+import { AuthModule } from '@thallesp/nestjs-better-auth';
+import { AppController } from './app.controller.js';
+import { AppService } from './app.service.js';
+import { PrismaModule } from './lib/database/prisma.module.js';
+import { auth } from './lib/auth/auth.js';
+import { UserModule } from './module/user/user.module.js';
+
+const arcjetMode = process.env.ARCJET_MODE === 'DRY_RUN' ? 'DRY_RUN' : 'LIVE';
+
+// Powershell cmd test shield
+// 1..60 | ForEach-Object {
+//   curl.exe -s -o NUL -w "%{http_code}`n" http://localhost:3000
+// }
 
 @Module({
-  imports: [UserModule],
+  imports: [
+    ArcjetModule.forRoot({
+      isGlobal: true,
+      key: process.env.ARCJET_KEY!,
+      rules: [
+        shield({
+          mode: arcjetMode,
+        }),
+        fixedWindow({
+          mode: arcjetMode,
+          window: '1m',
+          max: 10,
+        }),
+      ],
+    }),
+    PrismaModule,
+    AuthModule.forRoot({ auth }),
+    UserModule,
+  ],
   controllers: [AppController],
-  providers: [AppService],
+  providers: [
+    AppService,
+    {
+      provide: APP_GUARD,
+      useClass: ArcjetGuard,
+    },
+  ],
 })
-export class AppModule implements NestModule {
-  configure(consumer: MiddlewareConsumer) {
-    // Apply to which route need to have specify header param
-    consumer.apply(ApiKeyMiddleware).forRoutes(UserController);
-  }
-}
+export class AppModule {}

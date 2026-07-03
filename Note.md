@@ -45,6 +45,6 @@ Guard
   - if true > call controller
   - if false > return error
 - at user.controller.ts for example, pick a route to add the guard
-  - or app.module.ts to apply to all route
+  - or main.ts to apply to all route
 - cmd for generate guard file
   - nest g guard guards/role --flat

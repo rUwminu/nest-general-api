@@ -1,15 +1,14 @@
-import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
-import { TransformInterceptor } from './utils/transform.interceptor';
+import 'dotenv/config';
 import { ValidationPipe } from '@nestjs/common';
-import { RoleGuard } from './guards/role.guard';
+import { NestFactory, Reflector } from '@nestjs/core';
+import { AppModule } from './app.module.js';
+import { TransformInterceptor } from './common/interceptors/transform.interceptor.js';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule);
+  const app = await NestFactory.create(AppModule, { bodyParser: false });
 
-  // app.useGlobalGuards(new RoleGuard()); // this apply to all route
   app.useGlobalPipes(new ValidationPipe());
-  app.useGlobalInterceptors(new TransformInterceptor());
+  app.useGlobalInterceptors(new TransformInterceptor(app.get(Reflector)));
 
   await app.listen(process.env.PORT ?? 3000);
 }
