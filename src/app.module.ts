@@ -7,6 +7,7 @@ import { AppService } from './app.service.js';
 import { PrismaModule } from './lib/database/prisma.module.js';
 import { auth } from './lib/auth/auth.js';
 import { UserModule } from './module/user/user.module.js';
+import { EventModule } from './module/event/event.module.js';
 
 const arcjetMode = process.env.ARCJET_MODE === 'DRY_RUN' ? 'DRY_RUN' : 'LIVE';
 
@@ -34,6 +35,7 @@ const arcjetMode = process.env.ARCJET_MODE === 'DRY_RUN' ? 'DRY_RUN' : 'LIVE';
     PrismaModule,
     AuthModule.forRoot({ auth }),
     UserModule,
+    EventModule,
   ],
   controllers: [AppController],
   providers: [

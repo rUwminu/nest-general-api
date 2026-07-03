@@ -1,0 +1,19 @@
+# <type>: <subject> — imperative mood ("add", not "added"), ≤ 50 chars, no trailing period
+# Types: feat | fix | chore | refactor | docs | style | test | perf
+feat:
+
+# Why is this change needed? What problem does it solve or enable?
+# Wrap body lines at ~72 chars. Leave blank if the subject says enough.
+
+
+project: nest-general-api
+
+changes:
+
+- What did you do? Be specific — file/module names beat vague summaries.
+- Example: fixed auth token returning invalid on expired refresh token
+-
+
+# Optional footer — reference issues, flag breaking changes, etc.
+# Closes #
+# BREAKING CHANGE:

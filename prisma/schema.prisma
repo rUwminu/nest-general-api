@@ -13,21 +13,41 @@ datasource db {
 }
 
 enum Role {
-  PARTICIPANT
+  USER
   ADMIN
 }
 
+enum EventJoinPolicy {
+  OPEN
+  INVITE_ONLY
+}
+
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+}
+
+enum EventBanAction {
+  BANNED
+  UNBANNED
+}
+
 model User {
-  id            String    @id
-  name          String
-  email         String
-  emailVerified Boolean   @default(false)
-  image         String?
-  createdAt     DateTime  @default(now())
-  updatedAt     DateTime  @updatedAt
-  role          Role      @default(PARTICIPANT)
-  sessions      Session[]
-  accounts      Account[]
+  id                String             @id
+  name              String
+  email             String
+  emailVerified     Boolean            @default(false)
+  image             String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  role              Role               @default(USER)
+  sessions          Session[]
+  accounts          Account[]
+  events            Event[]            @relation("EventAuthor")
+  eventParticipants EventParticipant[]
+  eventInvites      EventInvite[]
+  eventBanLogs      EventBanLog[]
 
   @@unique([email])
   @@map("user")
@@ -79,4 +99,69 @@ model Verification {
 
   @@index([identifier])
   @@map("verification")
+}
+
+model Event {
+  id           String             @id @default(cuid())
+  name         String
+  description  String?
+  startDate    DateTime
+  endDate      DateTime
+  isActive     Boolean            @default(true)
+  joinPolicy   EventJoinPolicy    @default(OPEN)
+  isBanned     Boolean            @default(false)
+  isDeleted    Boolean            @default(false)
+  deletedAt    DateTime?
+  authorId     String
+  author       User               @relation("EventAuthor", fields: [authorId], references: [id], onDelete: Cascade)
+  participants EventParticipant[]
+  invites      EventInvite[]
+  banLogs      EventBanLog[]
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+
+  @@index([authorId])
+  @@map("event")
+}
+
+model EventParticipant {
+  id       String   @id @default(cuid())
+  eventId  String
+  userId   String
+  event    Event    @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user     User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  joinedAt DateTime @default(now())
+
+  @@unique([eventId, userId])
+  @@index([userId])
+  @@map("event_participant")
+}
+
+model EventInvite {
+  id        String       @id @default(cuid())
+  eventId   String
+  userId    String
+  status    InviteStatus @default(PENDING)
+  event     Event        @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+
+  @@unique([eventId, userId])
+  @@index([userId])
+  @@map("event_invite")
+}
+
+model EventBanLog {
+  id        String         @id @default(cuid())
+  eventId   String
+  adminId   String
+  action    EventBanAction
+  reason    String?
+  event     Event          @relation(fields: [eventId], references: [id], onDelete: Cascade)
+  admin     User           @relation(fields: [adminId], references: [id], onDelete: Cascade)
+  createdAt DateTime       @default(now())
+
+  @@index([eventId])
+  @@map("event_ban_log")
 }
