@@ -64,17 +64,50 @@ Create an event. `authorId` is taken from the session — never send it in the b
 
 ## GET /event
 
-List events visible to the caller.
+List events visible to the caller. Paginated.
 
-**Visibility:** admins see everything (except soft-deleted); everyone else sees non-banned events, OR their own events, OR events they're a participant in.
+```
+GET /event?page=1&limit=10&search=offsite&sortBy=startDate&sortOrder=asc
+```
 
-No query params, no body.
+| Query param | Type   | Required | Notes                                                             |
+| ----------- | ------ | -------- | ----------------------------------------------------------------- |
+| `page`      | number | no       | default `1`, min `1`                                              |
+| `limit`     | number | no       | default `10`, min `1`, max `50`                                   |
+| `search`    | string | no       | case-insensitive `contains` match against `name` OR `description` |
+| `sortBy`    | enum   | no       | `startDate` \| `createdAt`, default `createdAt`                   |
+| `sortOrder` | enum   | no       | `asc` \| `desc`, default `desc`                                   |
+
+**Visibility:** admins see everything (except soft-deleted); everyone else sees non-banned events, OR their own events, OR events they're a participant in. `search` is applied on top of that visibility filter, not instead of it.
+
+**Response shape** — note this is one of the few endpoints where `data` isn't just the bare array. Each item includes the same `joinedUsers`/`invitedUsers`/`rejectedUsers` fields described below for `GET /event/:id`:
+
+```json
+{
+  "statusCode": 200,
+  "message": "Success",
+  "data": {
+    "items": [/* EventWithUserLists[] */],
+    "meta": { "page": 1, "limit": 10, "total": 37, "totalPages": 4 }
+  }
+}
+```
+
+**Errors:** `400` if `page`/`limit` aren't positive integers, or `limit` exceeds 50.
 
 ---
 
 ## GET /event/:id
 
-Get one event's detail, including `participants` (always) and `invites` (**owner/admin only** — omitted entirely for everyone else).
+Get one event's detail, with three user-list fields in place of the raw `participants`/`invites` relations:
+
+| Field           | Visibility           | Meaning                                                                 |
+| --------------- | -------------------- | ------------------------------------------------------------------------ |
+| `joinedUsers`   | everyone             | `EventParticipant` rows — people who have actually joined                |
+| `invitedUsers`  | everyone             | `EventInvite` rows with status `PENDING` — invited, not yet responded    |
+| `rejectedUsers` | **owner/admin only** | `EventInvite` rows with status `DECLINED`; field is omitted entirely for everyone else |
+
+Each entry is a user summary: `{ "id", "name", "email", "image" }`. Accepted invites aren't repeated in `invitedUsers` — once accepted, that user shows up in `joinedUsers` instead (accepting an invite creates the `EventParticipant` row).
 
 **Errors:** `404` if the event doesn't exist, is soft-deleted, or is hidden from the caller by the visibility rule (banned events 404 rather than 403, so their existence isn't leaked).
 

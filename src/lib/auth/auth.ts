@@ -14,13 +14,16 @@ export const auth = betterAuth({
   emailAndPassword: {
     enabled: true,
   },
+  // The Next.js frontend proxies /api/* here via rewrites; requests arrive
+  // with the browser origin, which must be trusted or POSTs are rejected.
+  trustedOrigins: ['http://localhost:3000'],
   user: {
     additionalFields: {
       role: {
         type: 'string',
         enum: ['USER', 'ADMIN'],
         defaultValue: 'USER',
-        input: true,
+        input: false,
       },
     },
   },

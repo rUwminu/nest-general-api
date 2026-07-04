@@ -9,6 +9,7 @@ import {
   EventInvite,
   EventJoinPolicy,
   EventParticipant,
+  InviteStatus,
   Prisma,
 } from '../../../generated/prisma/client.js';
 import { PrismaService } from '../../lib/database/prisma.service.js';
@@ -16,12 +17,24 @@ import { CreateEventDto } from './dto/create-event.dto.js';
 import { UpdateEventDto } from './dto/update-event.dto.js';
 import { BanEventDto } from './dto/ban-event.dto.js';
 import { UnbanEventDto } from './dto/unban-event.dto.js';
+import { ListEventsQueryDto } from './dto/list-events-query.dto.js';
 
 const ADMIN_ROLE = 'ADMIN';
+
+export interface PaginatedResult<T> {
+  items: T[];
+  meta: {
+    page: number;
+    limit: number;
+    total: number;
+    totalPages: number;
+  };
+}
 
 const userSummarySelect = {
   id: true,
   name: true,
+  email: true,
   image: true,
 } satisfies Prisma.UserSelect;
 
@@ -30,9 +43,20 @@ const eventDetailInclude = {
   invites: { include: { user: { select: userSummarySelect } } },
 } satisfies Prisma.EventInclude;
 
-type EventDetail = Prisma.EventGetPayload<{
+type EventWithRelations = Prisma.EventGetPayload<{
   include: typeof eventDetailInclude;
 }>;
+
+type UserSummary = Prisma.UserGetPayload<{ select: typeof userSummarySelect }>;
+
+export type EventWithUserLists = Omit<
+  EventWithRelations,
+  'participants' | 'invites'
+> & {
+  joinedUsers: UserSummary[];
+  invitedUsers: UserSummary[];
+  rejectedUsers?: UserSummary[];
+};
 
 @Injectable()
 export class EventService {
@@ -69,22 +93,61 @@ export class EventService {
     return this.withComputedIsActive(event);
   }
 
-  async findAll(userId: string, role: string): Promise<Event[]> {
-    const events = await this.prisma.event.findMany({
-      where: this.visibilityWhere(userId, role),
-      orderBy: { createdAt: 'desc' },
-    });
+  async findAll(
+    userId: string,
+    role: string,
+    query: ListEventsQueryDto,
+  ): Promise<PaginatedResult<EventWithUserLists>> {
+    const page = query.page ?? 1;
+    const limit = query.limit ?? 10;
+    const sortBy = query.sortBy ?? 'createdAt';
+    const sortOrder = query.sortOrder ?? 'desc';
 
-    return events.map((event) => this.withComputedIsActive(event));
+    const where: Prisma.EventWhereInput = {
+      AND: [
+        this.visibilityWhere(userId, role),
+        query.search
+          ? {
+              OR: [
+                { name: { contains: query.search, mode: 'insensitive' } },
+                {
+                  description: {
+                    contains: query.search,
+                    mode: 'insensitive',
+                  },
+                },
+              ],
+            }
+          : {},
+      ],
+    };
+
+    const [total, events] = await Promise.all([
+      this.prisma.event.count({ where }),
+      this.prisma.event.findMany({
+        where,
+        include: eventDetailInclude,
+        orderBy: { [sortBy]: sortOrder },
+        skip: (page - 1) * limit,
+        take: limit,
+      }),
+    ]);
+
+    return {
+      items: events.map((event) =>
+        this.withComputedIsActive(
+          this.toEventWithUserLists(event, userId, role),
+        ),
+      ),
+      meta: { page, limit, total, totalPages: Math.ceil(total / limit) },
+    };
   }
 
   async findOne(
     id: string,
     userId: string,
     role: string,
-  ): Promise<
-    Omit<EventDetail, 'invites'> & { invites?: EventDetail['invites'] }
-  > {
+  ): Promise<EventWithUserLists> {
     const event = await this.prisma.event.findFirst({
       where: { id, ...this.visibilityWhere(userId, role) },
       include: eventDetailInclude,
@@ -94,12 +157,34 @@ export class EventService {
       throw new NotFoundException(`Event with id ${id} not found`);
     }
 
-    const isOwnerOrAdmin = event.authorId === userId || role === ADMIN_ROLE;
+    return this.withComputedIsActive(
+      this.toEventWithUserLists(event, userId, role),
+    );
+  }
 
-    return this.withComputedIsActive({
-      ...event,
-      invites: isOwnerOrAdmin ? event.invites : undefined,
-    });
+  private toEventWithUserLists(
+    event: EventWithRelations,
+    viewerUserId: string,
+    role: string,
+  ): EventWithUserLists {
+    const { participants, invites, ...rest } = event;
+    const isOwnerOrAdmin =
+      event.authorId === viewerUserId || role === ADMIN_ROLE;
+
+    return {
+      ...rest,
+      joinedUsers: participants.map((participant) => participant.user),
+      invitedUsers: invites
+        .filter((invite) => invite.status === InviteStatus.PENDING)
+        .map((invite) => invite.user),
+      ...(isOwnerOrAdmin
+        ? {
+            rejectedUsers: invites
+              .filter((invite) => invite.status === InviteStatus.DECLINED)
+              .map((invite) => invite.user),
+          }
+        : {}),
+    };
   }
 
   async update(

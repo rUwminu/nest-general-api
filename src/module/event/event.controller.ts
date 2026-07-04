@@ -7,6 +7,7 @@ import {
   Patch,
   Post,
   Put,
+  Query,
 } from '@nestjs/common';
 import { Roles, Session, UserSession } from '@thallesp/nestjs-better-auth';
 import { auth } from '../../lib/auth/auth.js';
@@ -18,6 +19,7 @@ import { BanEventDto } from './dto/ban-event.dto.js';
 import { UnbanEventDto } from './dto/unban-event.dto.js';
 import { UpdateEventInvitesDto } from './dto/update-event-invites.dto.js';
 import { RespondEventInviteDto } from './dto/respond-event-invite.dto.js';
+import { ListEventsQueryDto } from './dto/list-events-query.dto.js';
 
 @Controller('event')
 export class EventController {
@@ -33,8 +35,11 @@ export class EventController {
   }
 
   @Get()
-  findAll(@Session() session: UserSession<typeof auth>) {
-    return this.eventService.findAll(session.user.id, session.user.role);
+  findAll(
+    @Query() query: ListEventsQueryDto,
+    @Session() session: UserSession<typeof auth>,
+  ) {
+    return this.eventService.findAll(session.user.id, session.user.role, query);
   }
 
   @Get(':id')
