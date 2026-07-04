@@ -13,6 +13,7 @@ import {
   Prisma,
 } from '../../../generated/prisma/client.js';
 import { PrismaService } from '../../lib/database/prisma.service.js';
+import { NotificationService } from '../notification/notification.service.js';
 import { CreateEventDto } from './dto/create-event.dto.js';
 import { UpdateEventDto } from './dto/update-event.dto.js';
 import { BanEventDto } from './dto/ban-event.dto.js';
@@ -60,7 +61,10 @@ export type EventWithUserLists = Omit<
 
 @Injectable()
 export class EventService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly notificationService: NotificationService,
+  ) {}
 
   async create(dto: CreateEventDto, authorId: string): Promise<Event> {
     const joinPolicy = dto.joinPolicy ?? EventJoinPolicy.OPEN;
@@ -89,6 +93,8 @@ export class EventService {
           : undefined,
       },
     });
+
+    await this.notifyInvited(event.id, authorId, inviteUserIds);
 
     return this.withComputedIsActive(event);
   }
@@ -219,11 +225,16 @@ export class EventService {
     }
 
     if (targetUserIds !== undefined) {
-      const operations = await this.buildInviteDiffOps(id, targetUserIds);
+      const { operations, toAdd } = await this.buildInviteDiffOps(
+        id,
+        targetUserIds,
+      );
 
       if (operations.length) {
         await this.prisma.$transaction(operations);
       }
+
+      await this.notifyInvited(id, userId, toAdd);
     }
 
     const updatedEvent = await this.prisma.event.update({
@@ -312,10 +323,19 @@ export class EventService {
     }
 
     if (status === 'DECLINED') {
-      return this.prisma.eventInvite.update({
+      const updatedInvite = await this.prisma.eventInvite.update({
         where: { eventId_userId: { eventId, userId } },
         data: { status },
       });
+
+      await this.notificationService.createResponseNotification(
+        event.authorId,
+        userId,
+        eventId,
+        status,
+      );
+
+      return updatedInvite;
     }
 
     const [, updatedInvite] = await this.prisma.$transaction([
@@ -329,6 +349,13 @@ export class EventService {
         data: { status },
       }),
     ]);
+
+    await this.notificationService.createResponseNotification(
+      event.authorId,
+      userId,
+      eventId,
+      status,
+    );
 
     return updatedInvite;
   }
@@ -379,19 +406,43 @@ export class EventService {
       );
     }
 
-    const operations = await this.buildInviteDiffOps(eventId, targetUserIds);
+    const { operations, toAdd } = await this.buildInviteDiffOps(
+      eventId,
+      targetUserIds,
+    );
 
     if (operations.length) {
       await this.prisma.$transaction(operations);
     }
 
+    await this.notifyInvited(eventId, ownerId, toAdd);
+
     return this.prisma.eventInvite.findMany({ where: { eventId } });
+  }
+
+  private async notifyInvited(
+    eventId: string,
+    authorId: string,
+    inviteUserIds: string[],
+  ): Promise<void> {
+    await Promise.all(
+      inviteUserIds.map((userId) =>
+        this.notificationService.createInviteNotification(
+          userId,
+          authorId,
+          eventId,
+        ),
+      ),
+    );
   }
 
   private async buildInviteDiffOps(
     eventId: string,
     targetUserIds: string[],
-  ): Promise<Prisma.PrismaPromise<unknown>[]> {
+  ): Promise<{
+    operations: Prisma.PrismaPromise<unknown>[];
+    toAdd: string[];
+  }> {
     const existingInvites = await this.prisma.eventInvite.findMany({
       where: { eventId },
       select: { userId: true },
@@ -406,7 +457,7 @@ export class EventService {
       (id) => !targetUserIdSet.has(id),
     );
 
-    return [
+    const operations = [
       ...(toRemove.length
         ? [
             this.prisma.eventInvite.deleteMany({
@@ -422,6 +473,8 @@ export class EventService {
           ]
         : []),
     ];
+
+    return { operations, toAdd };
   }
 
   private async sanitizeInviteUserIds(

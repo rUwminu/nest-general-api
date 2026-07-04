@@ -8,6 +8,7 @@ import { PrismaModule } from './lib/database/prisma.module.js';
 import { auth } from './lib/auth/auth.js';
 import { UserModule } from './module/user/user.module.js';
 import { EventModule } from './module/event/event.module.js';
+import { NotificationModule } from './module/notification/notification.module.js';
 
 const arcjetMode = process.env.ARCJET_MODE === 'DRY_RUN' ? 'DRY_RUN' : 'LIVE';
 
@@ -28,7 +29,7 @@ const arcjetMode = process.env.ARCJET_MODE === 'DRY_RUN' ? 'DRY_RUN' : 'LIVE';
         fixedWindow({
           mode: arcjetMode,
           window: '1m',
-          max: 10,
+          max: 80,
         }),
       ],
     }),
@@ -36,6 +37,7 @@ const arcjetMode = process.env.ARCJET_MODE === 'DRY_RUN' ? 'DRY_RUN' : 'LIVE';
     AuthModule.forRoot({ auth }),
     UserModule,
     EventModule,
+    NotificationModule,
   ],
   controllers: [AppController],
   providers: [
