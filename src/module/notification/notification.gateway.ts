@@ -8,13 +8,14 @@ import {
 import { Server, Socket } from 'socket.io';
 import { fromNodeHeaders } from 'better-auth/node';
 import { auth } from '../../lib/auth/auth.js';
+import { getAllowedOrigins } from '../../common/utils/allowed-origins.js';
 
 function roomFor(userId: string): string {
   return `user:${userId}`;
 }
 
 @WebSocketGateway({
-  cors: { origin: ['http://localhost:3000'], credentials: true },
+  cors: { origin: getAllowedOrigins(), credentials: true },
 })
 export class NotificationGateway
   implements OnGatewayConnection, OnGatewayDisconnect
