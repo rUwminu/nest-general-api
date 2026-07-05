@@ -50,13 +50,16 @@ type EventWithRelations = Prisma.EventGetPayload<{
 
 type UserSummary = Prisma.UserGetPayload<{ select: typeof userSummarySelect }>;
 
+type InvitedUserSummary = UserSummary & { isRemoveable: boolean };
+
 export type EventWithUserLists = Omit<
   EventWithRelations,
   'participants' | 'invites'
 > & {
   joinedUsers: UserSummary[];
-  invitedUsers: UserSummary[];
+  invitedUsers: InvitedUserSummary[];
   rejectedUsers?: UserSummary[];
+  isJoinable: boolean;
 };
 
 @Injectable()
@@ -176,13 +179,20 @@ export class EventService {
     const { participants, invites, ...rest } = event;
     const isOwnerOrAdmin =
       event.authorId === viewerUserId || role === ADMIN_ROLE;
+    const isJoinable =
+      event.joinPolicy !== EventJoinPolicy.INVITE_ONLY ||
+      invites.some((invite) => invite.userId === viewerUserId);
 
     return {
       ...rest,
+      isJoinable,
       joinedUsers: participants.map((participant) => participant.user),
       invitedUsers: invites
-        .filter((invite) => invite.status === InviteStatus.PENDING)
-        .map((invite) => invite.user),
+        .filter((invite) => invite.status !== InviteStatus.DECLINED)
+        .map((invite) => ({
+          ...invite.user,
+          isRemoveable: invite.status !== InviteStatus.ACCEPTED,
+        })),
       ...(isOwnerOrAdmin
         ? {
             rejectedUsers: invites
@@ -328,12 +338,19 @@ export class EventService {
         data: { status },
       });
 
-      await this.notificationService.createResponseNotification(
-        event.authorId,
-        userId,
-        eventId,
-        status,
-      );
+      await Promise.all([
+        this.notificationService.createResponseNotification(
+          event.authorId,
+          userId,
+          eventId,
+          status,
+        ),
+        this.notificationService.resolveInviteNotification(
+          userId,
+          eventId,
+          status,
+        ),
+      ]);
 
       return updatedInvite;
     }
@@ -350,12 +367,19 @@ export class EventService {
       }),
     ]);
 
-    await this.notificationService.createResponseNotification(
-      event.authorId,
-      userId,
-      eventId,
-      status,
-    );
+    await Promise.all([
+      this.notificationService.createResponseNotification(
+        event.authorId,
+        userId,
+        eventId,
+        status,
+      ),
+      this.notificationService.resolveInviteNotification(
+        userId,
+        eventId,
+        status,
+      ),
+    ]);
 
     return updatedInvite;
   }
@@ -372,16 +396,42 @@ export class EventService {
       return existingParticipant;
     }
 
-    if (event.joinPolicy === EventJoinPolicy.INVITE_ONLY) {
-      const invite = await this.prisma.eventInvite.findUnique({
-        where: { eventId_userId: { eventId, userId } },
-      });
+    const invite = await this.prisma.eventInvite.findUnique({
+      where: { eventId_userId: { eventId, userId } },
+    });
 
-      if (!invite) {
-        throw new ForbiddenException(
-          'This event is invite-only and you have not been invited',
-        );
-      }
+    if (event.joinPolicy === EventJoinPolicy.INVITE_ONLY && !invite) {
+      throw new ForbiddenException(
+        'This event is invite-only and you have not been invited',
+      );
+    }
+
+    if (invite && invite.status !== InviteStatus.ACCEPTED) {
+      const [participant] = await this.prisma.$transaction([
+        this.prisma.eventParticipant.create({
+          data: { eventId, userId },
+        }),
+        this.prisma.eventInvite.update({
+          where: { eventId_userId: { eventId, userId } },
+          data: { status: InviteStatus.ACCEPTED },
+        }),
+      ]);
+
+      await Promise.all([
+        this.notificationService.createResponseNotification(
+          event.authorId,
+          userId,
+          eventId,
+          InviteStatus.ACCEPTED,
+        ),
+        this.notificationService.resolveInviteNotification(
+          userId,
+          eventId,
+          InviteStatus.ACCEPTED,
+        ),
+      ]);
+
+      return participant;
     }
 
     return this.prisma.eventParticipant.create({
@@ -445,7 +495,7 @@ export class EventService {
   }> {
     const existingInvites = await this.prisma.eventInvite.findMany({
       where: { eventId },
-      select: { userId: true },
+      select: { userId: true, status: true },
     });
     const existingUserIds = new Set(
       existingInvites.map((invite) => invite.userId),
@@ -453,9 +503,13 @@ export class EventService {
     const targetUserIdSet = new Set(targetUserIds);
 
     const toAdd = targetUserIds.filter((id) => !existingUserIds.has(id));
-    const toRemove = [...existingUserIds].filter(
-      (id) => !targetUserIdSet.has(id),
-    );
+    const toRemove = existingInvites
+      .filter(
+        (invite) =>
+          invite.status !== InviteStatus.ACCEPTED &&
+          !targetUserIdSet.has(invite.userId),
+      )
+      .map((invite) => invite.userId);
 
     const operations = [
       ...(toRemove.length

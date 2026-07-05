@@ -29,6 +29,7 @@ const eventSummarySelect = {
   name: true,
   startDate: true,
   endDate: true,
+  isBanned: true,
 } satisfies Prisma.EventSelect;
 
 const notificationInclude = {
@@ -63,6 +64,19 @@ export class NotificationService {
         eventId,
         type: NotificationType.INVITE,
       },
+    });
+
+    await this.pushUnreadCount(recipientId);
+  }
+
+  async resolveInviteNotification(
+    recipientId: string,
+    eventId: string,
+    status: typeof InviteStatus.ACCEPTED | typeof InviteStatus.DECLINED,
+  ): Promise<void> {
+    await this.prisma.notification.updateMany({
+      where: { recipientId, eventId, type: NotificationType.INVITE },
+      data: { status, respondedAt: new Date() },
     });
 
     await this.pushUnreadCount(recipientId);

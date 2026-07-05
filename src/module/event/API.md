@@ -104,10 +104,12 @@ Get one event's detail, with three user-list fields in place of the raw `partici
 | Field           | Visibility           | Meaning                                                                 |
 | --------------- | -------------------- | ------------------------------------------------------------------------ |
 | `joinedUsers`   | everyone             | `EventParticipant` rows — people who have actually joined                |
-| `invitedUsers`  | everyone             | `EventInvite` rows with status `PENDING` — invited, not yet responded    |
+| `invitedUsers`  | everyone             | `EventInvite` rows with status `PENDING` or `ACCEPTED` — everyone with a live invite |
 | `rejectedUsers` | **owner/admin only** | `EventInvite` rows with status `DECLINED`; field is omitted entirely for everyone else |
 
-Each entry is a user summary: `{ "id", "name", "email", "image" }`. Accepted invites aren't repeated in `invitedUsers` — once accepted, that user shows up in `joinedUsers` instead (accepting an invite creates the `EventParticipant` row).
+`joinedUsers`/`rejectedUsers` entries are a user summary: `{ "id", "name", "email", "image" }`. `invitedUsers` entries additionally carry `isRemoveable`: `false` when the invite is `ACCEPTED` (the user already joined — removing them from an edit's invite list won't delete this invite record), `true` when still `PENDING`. This keeps already-joined users visible in the invite list so an edit form doesn't accidentally submit a target list that omits them.
+
+Also included: `isJoinable` (boolean) — whether the calling user can call `POST /event/:id/join` right now. `true` for `OPEN` events; for `INVITE_ONLY` events, `true` only if the caller has an `EventInvite` row for this event, **regardless of its status** (even `DECLINED` — an invite still exists, so re-joining directly is allowed and flips it back to `ACCEPTED`). Use this instead of scanning `invitedUsers` for your own id to decide whether to show the Join button — `invitedUsers` excludes `DECLINED` invites and hides `rejectedUsers` from non-owners, so a user who declined has no other way to see that they're still eligible to join.
 
 **Errors:** `404` if the event doesn't exist, is soft-deleted, or is hidden from the caller by the visibility rule (banned events 404 rather than 403, so their existence isn't leaked).
 
@@ -130,6 +132,8 @@ Update an event. **Owner only.**
 ```
 
 `inviteUserIds`, if present, **replaces** the event's invite list the same way `PUT /event/:id/invites` does (diffed: missing users removed, new users added, unchanged users keep their `PENDING`/`ACCEPTED`/`DECLINED` status). Omit the field entirely to leave existing invites untouched. `PUT /event/:id/invites` still exists as a lighter-weight alternative when you only need to change invites without resending the rest of the event.
+
+`ACCEPTED` invites are never removed by this diff, even if their userId is missing from `inviteUserIds` — an accepted invite means the user already joined (`EventParticipant` row), and removing them from the event is a separate action, not a side effect of editing the invite list. Use `invitedUsers[].isRemoveable` from `GET /event/:id` to know which entries an edit form can actually drop.
 
 **Errors:** `403` if the caller isn't the event's author. `404` if not found/deleted. `400` if `inviteUserIds` contains an unknown userId, if the resulting `joinPolicy` is `INVITE_ONLY` with zero invitees (whether that's because `inviteUserIds` was sent empty, or because `joinPolicy` was switched to `INVITE_ONLY` on an event that currently has no invites), or if the resulting `endsAt`/`startsAt` pair (merging whatever you sent with the event's existing dates) would leave `endsAt` before or equal to `startsAt` — this is checked even if you only send one of the two dates.
 
